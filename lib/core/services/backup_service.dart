@@ -25,6 +25,63 @@ class BackupFileInfo {
 }
 
 class BackupService {
+  static Map<String, dynamic> validatePayload(dynamic decoded) {
+    if (decoded is! Map<String, dynamic> ||
+        decoded['app'] != 'Money Tracker' ||
+        (decoded['version'] != null && decoded['version'] != 1) ||
+        decoded['data'] is! Map<String, dynamic>) {
+      throw Exception('Berkas cadangan tidak valid atau versinya tidak didukung.');
+    }
+    final data = decoded['data'] as Map<String, dynamic>;
+    const requiredFields = <String, Map<String, Type>>{
+      'pockets': {'id': String, 'name': String, 'icon_name': String, 'color_value': num, 'initial_balance': num, 'created_at': String},
+      'categories': {'id': String, 'name': String, 'icon_name': String, 'color_value': num, 'type': String},
+      'transactions': {'id': String, 'pocket_id': String, 'type': String, 'amount': num, 'category': String, 'note': String, 'merchant': String, 'date': String, 'created_at': String},
+    };
+    for (final section in requiredFields.entries) {
+      final rows = data[section.key];
+      if (rows is! List) throw Exception('Bagian ${section.key} tidak lengkap.');
+      final ids = <String>{};
+      for (final row in rows) {
+        if (row is! Map<String, dynamic>) throw Exception('Data ${section.key} tidak valid.');
+        for (final field in section.value.entries) {
+          final value = row[field.key];
+          if ((field.value == String && value is! String) ||
+              (field.value == num && value is! num)) {
+            throw Exception('Data ${section.key}.${field.key} tidak valid.');
+          }
+        }
+        if (!ids.add(row['id'] as String)) throw Exception('ID ganda pada ${section.key}.');
+        for (final key in ['date', 'created_at']) {
+          if (row.containsKey(key) && DateTime.tryParse(row[key] as String) == null) {
+            throw Exception('Tanggal pada ${section.key} tidak valid.');
+          }
+        }
+      }
+    }
+    if (data.containsKey('category_budgets')) {
+      final budgets = data['category_budgets'];
+      if (budgets is! List) throw Exception('Data anggaran tidak valid.');
+      final names = <String>{};
+      for (final row in budgets) {
+        if (row is! Map || row['category'] is! String ||
+            (row['category'] as String).trim().isEmpty ||
+            row['monthly_limit'] is! num || !(row['monthly_limit'] as num).isFinite ||
+            (row['monthly_limit'] as num) <= 0 || !names.add(row['category'] as String)) {
+          throw Exception('Data anggaran tidak valid.');
+        }
+      }
+    }
+    return data;
+  }
+
+  static int countMissingPocketReferences(Map<String, dynamic> data) {
+    final pocketIds = (data['pockets'] as List).map((p) => p['id']).toSet();
+    return (data['transactions'] as List).where((tx) =>
+        !pocketIds.contains(tx['pocket_id']) ||
+        (tx['target_pocket_id'] != null && !pocketIds.contains(tx['target_pocket_id']))).length;
+  }
+
   /// Ekspor seluruh data SQLite menjadi berkas JSON dan buka dialog Berbagi / Simpan
   static Future<File> createBackupAndShare() async {
     final rawData = await AppDatabase.instance.exportAllData();
@@ -94,15 +151,7 @@ class BackupService {
       throw Exception('Format berkas tidak valid. Berkas harus berupa file JSON.');
     }
 
-    if (decoded is! Map<String, dynamic>) {
-      throw Exception('Struktur berkas cadangan salah.');
-    }
-
-    if (decoded['app'] != 'Money Tracker' || decoded['data'] == null) {
-      throw Exception('Berkas ini bukan cadangan Money Tracker yang valid.');
-    }
-
-    final rawData = decoded['data'] as Map<String, dynamic>;
+    final rawData = validatePayload(decoded);
     final pockets = rawData['pockets'] as List? ?? [];
     final categories = rawData['categories'] as List? ?? [];
     final transactions = rawData['transactions'] as List? ?? [];
@@ -126,6 +175,7 @@ class BackupService {
 
   /// Memulihkan database dari informasi backup yang telah divalidasi
   static Future<void> restore(BackupFileInfo backupInfo) async {
+    validatePayload({'app': 'Money Tracker', 'version': 1, 'data': backupInfo.rawData});
     await AppDatabase.instance.restoreAllData(backupInfo.rawData);
   }
 }

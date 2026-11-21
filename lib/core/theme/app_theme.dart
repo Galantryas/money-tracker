@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
 class AppTheme {
-  static const primaryColor = Color(0xFF6366F1); // Indigo / Violet (#6366F1)
+  static const primaryColor = Color(0xFF4F46E5);
   static const primaryDark = Color(0xFF4F46E5); // Deep Indigo (#4F46E5)
   static const secondaryColor = Color(0xFF10B981); // Emerald (#10B981)
   static const accentColor = Color(0xFFF97316); // Orange
   static const errorColor = Color(0xFFEF4444); // Red
-  static const buttonColor = Color(0xFF818CF8); // Lavender / Purple Button (#818CF8)
+  static const buttonColor = Color(0xFF4F46E5);
   static const tintColor = Color(0xFFEEF2FF); // Soft Lavender Tint (#EEF2FF)
 
   static ThemeData get lightTheme {
@@ -97,7 +97,8 @@ class AppTheme {
       colorScheme: ColorScheme.fromSeed(
         seedColor: primaryColor,
         brightness: Brightness.dark,
-        primary: primaryColor,
+        primary: const Color(0xFF818CF8),
+        onPrimary: const Color(0xFF0F172A),
         secondary: secondaryColor,
         surface: const Color(0xFF1E293B),
         error: errorColor,

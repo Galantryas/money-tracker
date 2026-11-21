@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/services/backup_service.dart';
+import '../../core/services/transaction_csv_service.dart';
 import '../../core/utils/date_formatter.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/gemini_provider.dart';
@@ -9,6 +10,7 @@ import '../../providers/pocket_provider.dart';
 import '../../providers/reminder_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../providers/transaction_provider.dart';
+import '../../providers/category_budget_provider.dart';
 import '../../providers/user_profile_provider.dart';
 import '../ai/ai_advisor_screen.dart';
 import '../widgets/user_avatar_widget.dart';
@@ -94,8 +96,15 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
-  void _exportTransactionsCsv(BuildContext context, WidgetRef ref) {
-    final transactions = ref.read(transactionProvider).valueOrNull ?? [];
+  Future<void> _exportTransactionsCsv(BuildContext context, WidgetRef ref) async {
+    final state = ref.read(transactionProvider);
+    if (state.valueOrNull == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Data transaksi belum tersedia. Coba lagi.')),
+      );
+      return;
+    }
+    final transactions = state.valueOrNull!;
     if (transactions.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Tidak ada transaksi untuk diekspor')),
@@ -103,57 +112,15 @@ class SettingsScreen extends ConsumerWidget {
       return;
     }
 
-    final StringBuffer csvBuffer = StringBuffer();
-    csvBuffer.writeln('ID,Tanggal,Tipe,Kategori,Merchant,Catatan,Nominal');
-
-    for (var tx in transactions) {
-      csvBuffer.writeln(
-        '"${tx.id}","${DateFormatter.formatWithTime(tx.date)}","${tx.type}","${tx.category}","${tx.merchant}","${tx.note}",${tx.amount}',
-      );
+    try {
+      await TransactionCsvService.share(transactions);
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gagal membagikan CSV. Silakan coba lagi.')),
+        );
+      }
     }
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: const Text('Ekspor Riwayat CSV', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Total ${transactions.length} transaksi siap diekspor:'),
-              const SizedBox(height: 12),
-              Container(
-                height: 150,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.grey.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: SingleChildScrollView(
-                  child: SelectableText(
-                    csvBuffer.toString(),
-                    style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF6366F1),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-            ),
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Tutup'),
-          ),
-        ],
-      ),
-    );
   }
 
   Future<void> _handleBackup(BuildContext context, WidgetRef ref) async {
@@ -204,6 +171,7 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   Future<void> _handleRestore(BuildContext context, WidgetRef ref) async {
+    var isRestoring = false;
     try {
       final backupInfo = await BackupService.pickAndValidateBackup();
       if (backupInfo == null) {
@@ -250,6 +218,13 @@ class SettingsScreen extends ConsumerWidget {
                     Text('Jumlah Kantong: ${backupInfo.pocketCount}', style: const TextStyle(fontSize: 12)),
                     Text('Jumlah Kategori: ${backupInfo.categoryCount}', style: const TextStyle(fontSize: 12)),
                     Text('Jumlah Transaksi: ${backupInfo.transactionCount}', style: const TextStyle(fontSize: 12)),
+                    if (BackupService.countMissingPocketReferences(backupInfo.rawData) > 0) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        '${BackupService.countMissingPocketReferences(backupInfo.rawData)} transaksi merujuk ke kantong yang tidak ada. Data akan dipertahankan, tetapi saldo atau laporan mungkin tidak lengkap.',
+                        style: const TextStyle(fontSize: 12, color: Colors.red),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -294,15 +269,19 @@ class SettingsScreen extends ConsumerWidget {
             ),
           ),
         );
+        isRestoring = true;
 
         await BackupService.restore(backupInfo);
 
         // Refresh providers agar UI seketika terupdate
         ref.invalidate(pocketProvider);
         ref.invalidate(transactionProvider);
+        ref.invalidate(categoryBudgetLimitsProvider);
+        ref.invalidate(categoriesProvider);
 
         if (context.mounted) {
           Navigator.pop(context); // tutup dialog loading
+          isRestoring = false;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
@@ -315,6 +294,7 @@ class SettingsScreen extends ConsumerWidget {
       }
     } catch (e) {
       if (context.mounted) {
+        if (isRestoring) Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Gagal memulihkan data: $e'),
@@ -561,7 +541,10 @@ class SettingsScreen extends ConsumerWidget {
                             child: const Icon(Icons.alarm_rounded, color: Color(0xFF818CF8), size: 20),
                           ),
                           title: const Text('Alarm Pengingat Catat Keuangan', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                          subtitle: const Text('Notifikasi harian jika belum mencatat keuangan', style: TextStyle(fontSize: 12)),
+                          subtitle: Text(
+                            reminderState.errorMessage ?? 'Notifikasi pengingat setiap hari',
+                            style: TextStyle(fontSize: 12, color: reminderState.errorMessage == null ? null : Colors.red),
+                          ),
                           value: reminderState.isEnabled,
                           onChanged: (val) {
                             ref.read(reminderProvider.notifier).toggleReminder(val);
@@ -580,7 +563,7 @@ class SettingsScreen extends ConsumerWidget {
                             ),
                             title: const Text('Jam Pengingat', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                             subtitle: Text(
-                              'Pukul ${reminderState.time.hour.toString().padLeft(2, '0')}:${reminderState.time.minute.toString().padLeft(2, '0')} WIB',
+                              'Pukul ${reminderState.time.hour.toString().padLeft(2, '0')}:${reminderState.time.minute.toString().padLeft(2, '0')} waktu perangkat',
                               style: const TextStyle(fontSize: 12),
                             ),
                             trailing: const Icon(Icons.chevron_right, size: 20),
@@ -597,12 +580,12 @@ class SettingsScreen extends ConsumerWidget {
                               );
                               if (picked != null) {
                                 await ref.read(reminderProvider.notifier).setTime(picked);
-                                if (context.mounted) {
+                                if (context.mounted && ref.read(reminderProvider).errorMessage == null) {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
                                       backgroundColor: const Color(0xFF6366F1),
                                       content: Text(
-                                        'Waktu pengingat disetel ke ${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')} WIB',
+                                        'Waktu pengingat disetel ke ${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')} waktu perangkat',
                                       ),
                                     ),
                                   );

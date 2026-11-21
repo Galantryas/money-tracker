@@ -252,6 +252,7 @@ Tugas Anda adalah:
 3. Mendeteksi kebocoran finansial, pengeluaran berlebihan, atau potensi risiko overbudget.
 4. Memberikan rekomendasi penghematan praktis, terukur, dan strategi alokasi dana (misal konsep 50/30/20 atau dana darurat).
 5. Berikan jawaban dalam Bahasa Indonesia yang santun, memotivasi, terstruktur rapi dengan poin-poin (bullet points), tebal untuk angka/istilah penting, dan mudah dipahami.
+6. Jawab pertanyaan pengguna secara langsung dan lengkap. Gunakan data yang tersedia, jelaskan keterbatasannya, dan jangan mengarang transaksi atau menarik kesimpulan yang tidak didukung data. Jika informasi penting tidak tersedia, tanyakan kepada pengguna.
 ''';
 
     // Construct request contents
@@ -288,7 +289,7 @@ Tugas Anda adalah:
       'contents': contents,
       'generationConfig': {
         'temperature': 0.7,
-        'maxOutputTokens': 2048,
+        'maxOutputTokens': 8192,
       }
     };
 
@@ -318,9 +319,18 @@ Tugas Anda adalah:
             if (content != null) {
               final parts = content['parts'] as List?;
               if (parts != null && parts.isNotEmpty) {
-                final text = parts[0]['text'] as String?;
-                if (text != null && text.trim().isNotEmpty) {
-                  return text.trim();
+                final text = parts
+                    .whereType<Map<String, dynamic>>()
+                    .where((part) => part['thought'] != true)
+                    .map((part) => part['text'])
+                    .whereType<String>()
+                    .join()
+                    .trim();
+                if (text.isNotEmpty) {
+                  if (candidate['finishReason'] == 'MAX_TOKENS') {
+                    return '$text\n\n⚠️ Jawaban terpotong karena mencapai batas panjang. Minta saya melanjutkan untuk membaca sisanya.';
+                  }
+                  return text;
                 }
               }
             }

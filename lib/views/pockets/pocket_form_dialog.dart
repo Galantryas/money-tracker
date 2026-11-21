@@ -6,6 +6,7 @@ import '../../core/utils/icon_helper.dart';
 import '../../core/utils/thousands_separator_input_formatter.dart';
 import '../../models/pocket.dart';
 import '../../providers/pocket_provider.dart';
+import '../../providers/transaction_provider.dart';
 
 class PocketFormDialog extends ConsumerStatefulWidget {
   final Pocket? initialPocket;
@@ -69,6 +70,7 @@ class _PocketFormDialogState extends ConsumerState<PocketFormDialog> {
         colorValue: _selectedColor,
         initialBalance: initialBalance,
         budgetLimit: budgetLimit,
+        clearBudgetLimit: budgetLimitText.isEmpty,
       );
       await ref.read(pocketProvider.notifier).updatePocket(updated);
     } else {
@@ -287,8 +289,17 @@ class _PocketFormDialogState extends ConsumerState<PocketFormDialog> {
                           );
 
                           if (confirm == true) {
-                            await ref.read(pocketProvider.notifier).deletePocket(widget.initialPocket!.id);
-                            if (mounted) Navigator.of(context).pop();
+                            try {
+                              await ref.read(pocketProvider.notifier).deletePocket(widget.initialPocket!.id);
+                              ref.invalidate(transactionProvider);
+                              if (mounted) Navigator.of(context).pop();
+                            } catch (e) {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+                                );
+                              }
+                            }
                           }
                         },
                       ),

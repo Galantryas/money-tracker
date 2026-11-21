@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/database/app_database.dart';
 import '../models/transaction_model.dart';
 import 'pocket_provider.dart';
+import '../core/utils/category_order.dart';
 
 class TransactionNotifier extends StateNotifier<AsyncValue<List<TransactionModel>>> {
   final Ref _ref;
@@ -60,26 +61,8 @@ final transactionProvider = StateNotifierProvider<TransactionNotifier, AsyncValu
 // Category model & provider for category dropdowns
 final categoriesProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final db = await AppDatabase.instance.database;
-  final list = await db.query('categories');
-  final result = List<Map<String, dynamic>>.from(list);
-  result.sort((a, b) {
-    final aType = a['type']?.toString() ?? '';
-    final bType = b['type']?.toString() ?? '';
-    if (aType != bType) return aType.compareTo(bType);
-
-    final aName = (a['name']?.toString() ?? '').toLowerCase();
-    final bName = (b['name']?.toString() ?? '').toLowerCase();
-    final aIcon = (a['icon_name']?.toString() ?? '').toLowerCase();
-    final bIcon = (b['icon_name']?.toString() ?? '').toLowerCase();
-
-    final aIsOther = aName.contains('lain') || aIcon == 'more_horizontal';
-    final bIsOther = bName.contains('lain') || bIcon == 'more_horizontal';
-
-    if (aIsOther && !bIsOther) return 1;
-    if (!aIsOther && bIsOther) return -1;
-    return 0;
-  });
-  return result;
+  final list = await AppDatabase.instance.loadCategories(db);
+  return orderCategories(list);
 });
 
 // Provider untuk Total Pengeluaran & Pemasukan Bulan Berjalan

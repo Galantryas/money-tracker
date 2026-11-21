@@ -6,6 +6,7 @@ import '../../providers/balance_privacy_provider.dart';
 import '../../providers/pocket_provider.dart';
 import 'pocket_detail_screen.dart';
 import 'pocket_form_dialog.dart';
+import '../widgets/balance_visibility_button.dart';
 
 class PocketsScreen extends ConsumerWidget {
   const PocketsScreen({super.key});
@@ -57,30 +58,21 @@ class PocketsScreen extends ConsumerWidget {
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          Text(
-                            isBalanceVisible ? CurrencyFormatter.format(totalBalance) : '••••••••',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 28,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: -0.5,
+                          Flexible(
+                            child: Text(
+                              isBalanceVisible ? CurrencyFormatter.format(totalBalance) : '••••••••',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 28,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: -0.5,
+                              ),
                             ),
                           ),
                           const SizedBox(width: 10),
-                          GestureDetector(
-                            onTap: () => ref.read(balancePrivacyProvider.notifier).toggle(),
-                            child: Container(
-                              padding: const EdgeInsets.all(6),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.18),
-                                shape: BoxShape.circle,
-                              ),
-                              child: Icon(
-                                isBalanceVisible ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-                                color: Colors.white,
-                                size: 18,
-                              ),
-                            ),
+                          BalanceVisibilityButton(
+                            isVisible: isBalanceVisible,
+                            onPressed: () => ref.read(balancePrivacyProvider.notifier).toggle(),
                           ),
                         ],
                       ),

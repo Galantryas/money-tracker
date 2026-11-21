@@ -48,6 +48,7 @@ class Pocket {
     int? colorValue,
     double? initialBalance,
     double? budgetLimit,
+    bool clearBudgetLimit = false,
     DateTime? createdAt,
   }) {
     return Pocket(
@@ -56,7 +57,7 @@ class Pocket {
       iconName: iconName ?? this.iconName,
       colorValue: colorValue ?? this.colorValue,
       initialBalance: initialBalance ?? this.initialBalance,
-      budgetLimit: budgetLimit ?? this.budgetLimit,
+      budgetLimit: clearBudgetLimit ? null : budgetLimit ?? this.budgetLimit,
       createdAt: createdAt ?? this.createdAt,
     );
   }

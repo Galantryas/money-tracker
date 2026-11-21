@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/utils/currency_formatter.dart';
+import '../../core/utils/financial_value_display.dart';
 import '../../core/utils/date_formatter.dart';
 import '../../core/utils/icon_helper.dart';
 import '../../models/transaction_model.dart';
@@ -18,6 +19,8 @@ import '../transactions/add_transaction_screen.dart';
 import '../transactions/transfer_screen.dart';
 import '../widgets/card_wave_painter.dart';
 import '../widgets/user_avatar_widget.dart';
+import '../widgets/balance_visibility_button.dart';
+import '../budgets/category_budget_alerts.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
   final Function(int) onNavigateTab;
@@ -224,26 +227,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                       ),
                                     ],
                                   ),
-                                  GestureDetector(
-                                    onTap: () => ref.read(balancePrivacyProvider.notifier).toggle(),
-                                    child: Container(
-                                      padding: const EdgeInsets.all(6),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white.withOpacity(0.18),
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: Icon(
-                                        isBalanceVisible ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-                                        color: Colors.white,
-                                        size: 18,
-                                      ),
-                                    ),
+                                  BalanceVisibilityButton(
+                                    isVisible: isBalanceVisible,
+                                    onPressed: () => ref.read(balancePrivacyProvider.notifier).toggle(),
                                   ),
                                 ],
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                isBalanceVisible ? CurrencyFormatter.format(totalBalance) : '••••••••••',
+                                financialValueDisplay(pocketsAsync, totalBalance, isVisible: isBalanceVisible),
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 28,
@@ -275,7 +267,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                           children: [
                                             Text('Pemasukan', style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 11)),
                                             Text(
-                                              isBalanceVisible ? CurrencyFormatter.formatCompact(monthlySummary.totalIncome) : '•••',
+                                              financialValueDisplay(transactionsAsync, monthlySummary.totalIncome, isVisible: isBalanceVisible, compact: true),
                                               style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
                                             ),
                                           ],
@@ -303,7 +295,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                             children: [
                                               Text('Pengeluaran', style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 11)),
                                               Text(
-                                                isBalanceVisible ? CurrencyFormatter.formatCompact(monthlySummary.totalExpense) : '•••',
+                                                financialValueDisplay(transactionsAsync, monthlySummary.totalExpense, isVisible: isBalanceVisible, compact: true),
                                                 style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
                                               ),
                                             ],
@@ -322,6 +314,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   ),
                 ),
                 const SizedBox(height: 22),
+                CategoryBudgetAlerts(month: DateTime(DateTime.now().year, DateTime.now().month)),
 
                 // Bagian Kantong Keuangan (Custom Pockets Carousel)
                 Row(
@@ -850,7 +843,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               ),
             ),
             Text(
-              '$sign${CurrencyFormatter.format(tx.amount)}',
+              CurrencyFormatter.privateAmount(tx.amount, isVisible: ref.watch(balancePrivacyProvider), sign: sign),
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 14,

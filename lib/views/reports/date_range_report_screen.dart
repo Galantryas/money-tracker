@@ -3,9 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../core/utils/date_formatter.dart';
 import '../../core/utils/icon_helper.dart';
+import '../../core/utils/transaction_filter.dart';
 import '../../models/transaction_model.dart';
 import '../../providers/pocket_provider.dart';
 import '../../providers/transaction_provider.dart';
+import '../../providers/balance_privacy_provider.dart';
+import '../../providers/transaction_export_provider.dart';
+import '../widgets/financial_summary.dart';
 import '../transactions/add_transaction_screen.dart';
 
 class DateRangeReportScreen extends ConsumerStatefulWidget {
@@ -22,6 +26,30 @@ class _DateRangeReportScreenState extends ConsumerState<DateRangeReportScreen> {
   String? _selectedPocketId; // null = all pockets
   String _selectedPreset = 'this_month';
   final Set<String> _expandedCategories = {};
+  bool _exporting = false;
+
+  Future<void> _exportReport() async {
+    final source = ref.read(transactionProvider);
+    if (_exporting || source.isLoading || source.hasError || !source.hasValue) return;
+    final selected = filterTransactions(source.requireValue, start: _startDate, end: _endDate,
+        pocketId: _selectedPocketId, type: _selectedType);
+    if (selected.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tidak ada transaksi pada laporan ini.')));
+      return;
+    }
+    setState(() => _exporting = true);
+    try {
+      await ref.read(transactionExporterProvider)(selected);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Laporan gagal dibagikan. Silakan coba lagi.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
 
   @override
   void initState() {
@@ -128,7 +156,7 @@ class _DateRangeReportScreenState extends ConsumerState<DateRangeReportScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
+                  Expanded(child: Row(
                     children: [
                       InkWell(
                         onTap: () => Navigator.pop(context),
@@ -144,15 +172,20 @@ class _DateRangeReportScreenState extends ConsumerState<DateRangeReportScreen> {
                         ),
                       ),
                       const SizedBox(width: 12),
-                      const Text(
+                      const Expanded(child: Text(
                         'Rincian Rentang Tanggal',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                         ),
-                      ),
+                      )),
                     ],
+                  )),
+                  IconButton(
+                    tooltip: 'Bagikan laporan CSV',
+                    onPressed: _exporting || transactionsAsync.isLoading || transactionsAsync.hasError ? null : _exportReport,
+                    icon: const Icon(Icons.ios_share, color: Colors.white),
                   ),
                   InkWell(
                     onTap: _pickCustomRange,
@@ -177,19 +210,8 @@ class _DateRangeReportScreenState extends ConsumerState<DateRangeReportScreen> {
                   final pockets = pocketsAsync.valueOrNull ?? [];
 
                   // Filter data berdasarkan rentang tanggal dan kantong
-                  final filtered = allTransactions.where((tx) {
-                    final txDate = DateTime(tx.date.year, tx.date.month, tx.date.day);
-                    final start = DateTime(_startDate.year, _startDate.month, _startDate.day);
-                    final end = DateTime(_endDate.year, _endDate.month, _endDate.day);
-
-                    if (txDate.isBefore(start) || txDate.isAfter(end)) return false;
-                    if (_selectedPocketId != null &&
-                        tx.pocketId != _selectedPocketId &&
-                        tx.targetPocketId != _selectedPocketId) {
-                      return false;
-                    }
-                    return true;
-                  }).toList();
+                  final filtered = filterTransactions(allTransactions,
+                      start: _startDate, end: _endDate, pocketId: _selectedPocketId);
 
                   double rangeIncome = 0;
                   double rangeExpense = 0;
@@ -201,7 +223,6 @@ class _DateRangeReportScreenState extends ConsumerState<DateRangeReportScreen> {
                       rangeExpense += tx.amount;
                     }
                   }
-                  final rangeNett = rangeIncome - rangeExpense;
 
                   final typeTxs = filtered.where((t) => t.type == _selectedType).toList();
                   final totalForType = _selectedType == 'expense' ? rangeExpense : rangeIncome;
@@ -322,200 +343,36 @@ class _DateRangeReportScreenState extends ConsumerState<DateRangeReportScreen> {
                         ],
 
                         // 2. Ringkasan Total Pemasukan & Pengeluaran
-                        Container(
-                          padding: const EdgeInsets.all(18),
-                          decoration: BoxDecoration(
-                            color: isDark ? const Color(0xFF1E293B) : Colors.white,
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.02),
-                                blurRadius: 8,
-                                offset: const Offset(0, 3),
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                          children: [
-                                            Container(
-                                              width: 8,
-                                              height: 8,
-                                              decoration: const BoxDecoration(color: Color(0xFF10B981), shape: BoxShape.circle),
-                                            ),
-                                            const SizedBox(width: 6),
-                                            const Text('Pemasukan', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          CurrencyFormatter.format(rangeIncome),
-                                          style: const TextStyle(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.bold,
-                                            color: Color(0xFF10B981),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  Container(width: 1, height: 36, color: isDark ? Colors.white12 : Colors.black12),
-                                  Expanded(
-                                    child: Padding(
-                                      padding: const EdgeInsets.only(left: 16.0),
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              Container(
-                                                width: 8,
-                                                height: 8,
-                                                decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
-                                              ),
-                                              const SizedBox(width: 6),
-                                              const Text('Pengeluaran', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                                            ],
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            CurrencyFormatter.format(rangeExpense),
-                                            style: const TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.bold,
-                                              color: Colors.red,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              const Divider(height: 1),
-                              const SizedBox(height: 12),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Text('Selisih Bersih (Nett)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-                                  Text(
-                                    CurrencyFormatter.format(rangeNett),
-                                    style: TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.bold,
-                                      color: rangeNett >= 0 ? const Color(0xFF10B981) : Colors.red,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
+                        FinancialSummary(income: rangeIncome, expense: rangeExpense,
+                            showNet: true, isVisible: ref.watch(balancePrivacyProvider)),
                         const SizedBox(height: 20),
 
                         // 3. Segment Selector: Pengeluaran vs Pemasukan
-                        Container(
-                          decoration: BoxDecoration(
-                            color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
-                            borderRadius: BorderRadius.circular(16),
+                        Wrap(spacing: 8, runSpacing: 8, children: [
+                          ChoiceChip(
+                            label: Text('Pengeluaran (${filtered.where((t) => t.isExpense).length})'),
+                            selected: _selectedType == 'expense',
+                            onSelected: (_) => setState(() => _selectedType = 'expense'),
                           ),
-                          padding: const EdgeInsets.all(4),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: GestureDetector(
-                                  onTap: () => setState(() => _selectedType = 'expense'),
-                                  child: AnimatedContainer(
-                                    duration: const Duration(milliseconds: 200),
-                                    padding: const EdgeInsets.symmetric(vertical: 10),
-                                    decoration: BoxDecoration(
-                                      color: _selectedType == 'expense' ? Colors.red : Colors.transparent,
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Center(
-                                      child: Row(
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        children: [
-                                          Icon(
-                                            Icons.arrow_upward_rounded,
-                                            size: 16,
-                                            color: _selectedType == 'expense' ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
-                                          ),
-                                          const SizedBox(width: 6),
-                                          Text(
-                                            'Pengeluaran (${filtered.where((t) => t.isExpense).length})',
-                                            style: TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 13,
-                                              color: _selectedType == 'expense' ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                child: GestureDetector(
-                                  onTap: () => setState(() => _selectedType = 'income'),
-                                  child: AnimatedContainer(
-                                    duration: const Duration(milliseconds: 200),
-                                    padding: const EdgeInsets.symmetric(vertical: 10),
-                                    decoration: BoxDecoration(
-                                      color: _selectedType == 'income' ? const Color(0xFF10B981) : Colors.transparent,
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Center(
-                                      child: Row(
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        children: [
-                                          Icon(
-                                            Icons.arrow_downward_rounded,
-                                            size: 16,
-                                            color: _selectedType == 'income' ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
-                                          ),
-                                          const SizedBox(width: 6),
-                                          Text(
-                                            'Pemasukan (${filtered.where((t) => t.isIncome).length})',
-                                            style: TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 13,
-                                              color: _selectedType == 'income' ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
+                          ChoiceChip(
+                            label: Text('Pemasukan (${filtered.where((t) => t.isIncome).length})'),
+                            selected: _selectedType == 'income',
+                            onSelected: (_) => setState(() => _selectedType = 'income'),
                           ),
-                        ),
+                        ]),
                         const SizedBox(height: 16),
 
                         // Header Rincian per Kategori
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        Wrap(
+                          spacing: 12,
+                          crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
                             const Text(
                               'Rincian per Kategori',
                               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                             ),
                             if (sortedCategories.isNotEmpty)
-                              Row(
+                              Wrap(
                                 children: [
                                   TextButton(
                                     style: TextButton.styleFrom(
@@ -704,68 +561,14 @@ class _DateRangeReportScreenState extends ConsumerState<DateRangeReportScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: color.withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(Icons.category_outlined, color: color, size: 20),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              categoryName,
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                            ),
-                            Text(
-                              '${transactions.length} transaksi  •  ${percentage.toStringAsFixed(1)}%',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: isDark ? Colors.white60 : Colors.black54,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(
-                            CurrencyFormatter.format(categoryTotal),
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
-                              color: _selectedType == 'expense' ? Colors.red : const Color(0xFF10B981),
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Row(
-                            children: [
-                              Text(
-                                isExpanded ? 'Tutup rincian' : 'Lihat isi',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: color,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              Icon(
-                                isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-                                size: 18,
-                                color: color,
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
+                  Text(categoryName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                  Text('${transactions.length} transaksi · ${percentage.toStringAsFixed(1)}%',
+                      style: Theme.of(context).textTheme.bodySmall),
+                  const SizedBox(height: 8),
+                  Text(CurrencyFormatter.privateAmount(categoryTotal, isVisible: ref.watch(balancePrivacyProvider)),
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                  Text(isExpanded ? 'Tutup rincian' : 'Lihat rincian',
+                      style: Theme.of(context).textTheme.bodyMedium),
                   const SizedBox(height: 10),
                   // Progress Bar Persentase
                   ClipRRect(
@@ -877,7 +680,7 @@ class _DateRangeReportScreenState extends ConsumerState<DateRangeReportScreen> {
                             ),
                           ),
                           Text(
-                            CurrencyFormatter.format(tx.amount),
+                            CurrencyFormatter.privateAmount(tx.amount, isVisible: ref.watch(balancePrivacyProvider)),
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 13,

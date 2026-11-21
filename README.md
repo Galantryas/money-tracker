@@ -11,6 +11,8 @@ Built with Flutter, stores everything on the device, and requires no account.
 - **Dashboard** — current balance, this month's spending, and recent activity.
 - **Statistics** — category breakdown and trend charts over a chosen period.
 - **Reports** — date-range report with totals per category.
+- **Category budgets:** monthly limits across pockets, with in-app warnings at 80% and 100%; configure them from Statistik > Anggaran kategori.
+- **Filtered report export:** share CSV for the selected report period, pocket, and income/expense type.
 - **Lock screen** — biometric unlock through the device's secure storage.
 - **Backup and restore** — export and import the database.
 - **Reminders** — scheduled notifications for recurring entries.
@@ -57,6 +59,12 @@ lib/
 ## Notes
 
 Data never leaves the device unless you export a backup or use the AI advisor, which sends a summary of your transactions to Gemini. The API key lives in platform secure storage, not in the repository.
+
+Updates retain the existing database and settings. Database version 2 adds a separate category-budget table without rewriting financial records. Older backups remain importable; newer backups include category budgets. Android updates must use the same application ID and signing key as the installed app. Back up before installing an update; do not uninstall to work around a signing mismatch.
+
+The expense category **Tempat Tinggal** appears directly after **Layanan** on both new and upgraded installations. Adding it does not rename or recategorize existing transactions.
+
+See [v1.0.4 update notes](docs/updates/v1.0.4.md) for the included changes, upgrade compatibility and verification limits.
 
 ## Licence
 

@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../core/utils/date_formatter.dart';
+import '../../core/utils/transaction_filter.dart';
 import '../../models/transaction_model.dart';
 import '../../providers/pocket_provider.dart';
 import '../../providers/transaction_provider.dart';
+import '../../providers/balance_privacy_provider.dart';
 import 'add_transaction_screen.dart';
 
 class TransactionHistoryScreen extends ConsumerStatefulWidget {
@@ -18,6 +20,8 @@ class _TransactionHistoryScreenState extends ConsumerState<TransactionHistoryScr
   String _searchQuery = '';
   String _selectedType = 'all'; // 'all', 'expense', 'income', 'transfer'
   String? _selectedPocketId; // null = all pockets
+  String? _selectedCategory;
+  DateTimeRange? _dateRange;
 
   @override
   Widget build(BuildContext context) {
@@ -42,8 +46,9 @@ class _TransactionHistoryScreenState extends ConsumerState<TransactionHistoryScr
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 8,
                     children: [
                       const Text(
                         'Riwayat Transaksi',
@@ -78,7 +83,7 @@ class _TransactionHistoryScreenState extends ConsumerState<TransactionHistoryScr
 
                   // Search Bar inside Header
                   Container(
-                    height: 46,
+                    constraints: const BoxConstraints(minHeight: 48),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(16),
@@ -152,6 +157,47 @@ class _TransactionHistoryScreenState extends ConsumerState<TransactionHistoryScr
                     loading: () => const SizedBox.shrink(),
                     error: (_, __) => const SizedBox.shrink(),
                   ),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Row(children: [
+                      TextButton.icon(
+                        icon: const Icon(Icons.date_range),
+                        label: Text(_dateRange == null ? 'Tanggal' : '${DateFormatter.formatShort(_dateRange!.start)} - ${DateFormatter.formatShort(_dateRange!.end)}'),
+                        onPressed: () async {
+                          final range = await showDateRangePicker(
+                            context: context,
+                            initialDateRange: _dateRange,
+                            firstDate: DateTime(1900),
+                            lastDate: DateTime(2100),
+                          );
+                          if (range != null && mounted) setState(() => _dateRange = range);
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      PopupMenuButton<String>(
+                        tooltip: 'Filter kategori',
+                        onSelected: (value) => setState(() => _selectedCategory = value.isEmpty ? null : value),
+                        itemBuilder: (_) {
+                          final categories = (transactionsAsync.valueOrNull ?? [])
+                              .map((tx) => tx.category).toSet().toList()..sort();
+                          return [
+                            const PopupMenuItem(value: '', child: Text('Semua kategori')),
+                            ...categories.map((category) => PopupMenuItem(value: category, child: Text(category))),
+                          ];
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                          child: Text(_selectedCategory ?? 'Kategori'),
+                        ),
+                      ),
+                      if (_dateRange != null || _selectedCategory != null)
+                        TextButton(onPressed: () => setState(() {
+                          _dateRange = null;
+                          _selectedCategory = null;
+                        }), child: const Text('Hapus filter')),
+                    ]),
+                  ),
                 ],
               ),
             ),
@@ -163,7 +209,10 @@ class _TransactionHistoryScreenState extends ConsumerState<TransactionHistoryScr
               child: transactionsAsync.when(
                 data: (transactions) {
                   // Apply filters
-                  final filtered = transactions.where((tx) {
+                  final filtered = filterTransactions(transactions,
+                      category: _selectedCategory,
+                      start: _dateRange?.start,
+                      end: _dateRange?.end).where((tx) {
                     if (_selectedType != 'all' && tx.type != _selectedType) return false;
                     if (_selectedPocketId != null &&
                         tx.pocketId != _selectedPocketId &&
@@ -180,6 +229,8 @@ class _TransactionHistoryScreenState extends ConsumerState<TransactionHistoryScr
                   }).toList();
 
                   if (filtered.isEmpty) {
+                    final hasFilters = _selectedType != 'all' || _selectedPocketId != null ||
+                        _selectedCategory != null || _dateRange != null || _searchQuery.isNotEmpty;
                     return Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -187,12 +238,24 @@ class _TransactionHistoryScreenState extends ConsumerState<TransactionHistoryScr
                           Icon(Icons.search_off, size: 54, color: Colors.grey.shade400),
                           const SizedBox(height: 12),
                           Text(
-                            'Tidak ada transaksi yang cocok',
+                            transactions.isEmpty
+                                ? 'Belum ada transaksi. Tekan Catat untuk menambahkan.'
+                                : 'Tidak ada transaksi yang cocok dengan filter.',
                             style: TextStyle(
                               color: isDark ? Colors.white60 : Colors.black54,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
+                          if (hasFilters && _searchQuery.isEmpty)
+                            TextButton(
+                              onPressed: () => setState(() {
+                                _selectedType = 'all';
+                                _selectedPocketId = null;
+                                _selectedCategory = null;
+                                _dateRange = null;
+                              }),
+                              child: const Text('Hapus filter'),
+                            ),
                         ],
                       ),
                     );
@@ -209,7 +272,15 @@ class _TransactionHistoryScreenState extends ConsumerState<TransactionHistoryScr
                   );
                 },
                 loading: () => const Center(child: CircularProgressIndicator(color: Color(0xFF6366F1))),
-                error: (e, _) => Center(child: Text('Error: $e')),
+                error: (_, __) => Center(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    const Text('Riwayat transaksi tidak dapat dimuat.'),
+                    TextButton(
+                      onPressed: () => ref.read(transactionProvider.notifier).loadTransactions(),
+                      child: const Text('Coba lagi'),
+                    ),
+                  ]),
+                ),
               ),
             ),
           ],
@@ -222,7 +293,8 @@ class _TransactionHistoryScreenState extends ConsumerState<TransactionHistoryScr
             MaterialPageRoute(builder: (_) => const AddTransactionScreen()),
           );
         },
-        backgroundColor: const Color(0xFF818CF8),
+        backgroundColor: Theme.of(context).colorScheme.brightness == Brightness.dark
+            ? const Color(0xFF4F46E5) : Theme.of(context).colorScheme.primary,
         icon: const Icon(Icons.add, color: Colors.white),
         label: const Text('Catat', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
       ),
@@ -230,55 +302,18 @@ class _TransactionHistoryScreenState extends ConsumerState<TransactionHistoryScr
   }
 
   Widget _buildTypePill(String key, String label) {
-    final isSelected = _selectedType == key;
-    return GestureDetector(
-      onTap: () => setState(() => _selectedType = key),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF6366F1) : const Color(0xFFEEF2FF),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isSelected ? Colors.white : const Color(0xFF6366F1),
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-            fontSize: 12,
-          ),
-        ),
-      ),
+    return ChoiceChip(
+      label: Text(label),
+      selected: _selectedType == key,
+      onSelected: (_) => setState(() => _selectedType = key),
     );
   }
 
   Widget _buildPocketPill(String? id, String label) {
-    final isSelected = _selectedPocketId == id;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return GestureDetector(
-      onTap: () => setState(() => _selectedPocketId = id),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? (isDark ? const Color(0xFF334155) : const Color(0xFF1E293B))
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: isSelected
-                ? Colors.transparent
-                : (isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isSelected ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-            fontSize: 11,
-          ),
-        ),
-      ),
+    return ChoiceChip(
+      label: Text(label),
+      selected: _selectedPocketId == id,
+      onSelected: (_) => setState(() => _selectedPocketId = id),
     );
   }
 
@@ -327,67 +362,22 @@ class _TransactionHistoryScreenState extends ConsumerState<TransactionHistoryScr
             ),
           ],
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: amountColor.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Icon(icon, color: amountColor, size: 20),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    tx.merchant.isNotEmpty ? tx.merchant : tx.category,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                  ),
-                  const SizedBox(height: 3),
-                  Row(
-                    children: [
-                      Text(
-                        tx.category,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: isDark ? Colors.white60 : Colors.black54,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Text('•', style: TextStyle(fontSize: 11, color: isDark ? Colors.white60 : Colors.black54)),
-                      const SizedBox(width: 6),
-                      Text(
-                        DateFormatter.formatShort(tx.date),
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: isDark ? Colors.white60 : Colors.black54,
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (tx.note.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 3.0),
-                      child: Text(
-                        tx.note,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: isDark ? Colors.white38 : Colors.black45,
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
+            Row(children: [
+              Icon(icon, color: amountColor, size: 20),
+              const SizedBox(width: 10),
+              Expanded(child: Text(tx.merchant.isNotEmpty ? tx.merchant : tx.category,
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14))),
+            ]),
+            const SizedBox(height: 6),
+            Text('${tx.category} · ${DateFormatter.formatShort(tx.date)}',
+                style: Theme.of(context).textTheme.bodySmall),
+            if (tx.note.isNotEmpty) Text(tx.note, style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 6),
             Text(
-              '$sign${CurrencyFormatter.format(tx.amount)}',
+              CurrencyFormatter.privateAmount(tx.amount, isVisible: ref.watch(balancePrivacyProvider), sign: sign),
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 14,

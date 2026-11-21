@@ -11,6 +11,10 @@ class CurrencyFormatter {
     return _formatter.format(amount);
   }
 
+  static String privateAmount(num amount, {required bool isVisible, String sign = ''}) {
+    return isVisible ? '$sign${format(amount)}' : '••••••';
+  }
+
   static String formatCompact(num amount) {
     if (amount >= 1000000000) {
       final val = amount / 1000000000;

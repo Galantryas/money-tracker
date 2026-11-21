@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
@@ -10,6 +11,14 @@ class NotificationService {
 
   static const int reminderNotificationId = 888;
   static bool _isInitialized = false;
+  static const MethodChannel _timeZoneChannel = MethodChannel('money_tracker/timezone');
+
+  @visibleForTesting
+  static Future<tz.Location> readDeviceTimeZone() async {
+    final name = await _timeZoneChannel.invokeMethod<String>('getLocalTimeZone');
+    if (name == null || name.isEmpty) throw Exception('Zona waktu perangkat tidak tersedia.');
+    return tz.getLocation(name);
+  }
 
   static Future<void> init() async {
     if (kIsWeb) return;
@@ -17,18 +26,6 @@ class NotificationService {
     try {
       // Inisialisasi zona waktu
       tz.initializeTimeZones();
-      try {
-        tz.setLocalLocation(tz.getLocation('Asia/Jakarta'));
-      } catch (_) {
-        // Fallback jika nama timezone sistem berbeda
-        final offset = DateTime.now().timeZoneOffset;
-        for (var loc in tz.timeZoneDatabase.locations.values) {
-          if (loc.currentTimeZone.offset == offset.inMilliseconds) {
-            tz.setLocalLocation(loc);
-            break;
-          }
-        }
-      }
 
       const AndroidInitializationSettings initializationSettingsAndroid =
           AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -74,11 +71,18 @@ class NotificationService {
     required int hour,
     required int minute,
   }) async {
-    if (kIsWeb) return;
+    if (kIsWeb || !Platform.isAndroid) {
+      throw UnsupportedError('Pengingat belum didukung pada perangkat ini.');
+    }
     if (!_isInitialized) await init();
+    if (!_isInitialized) throw Exception('Layanan notifikasi tidak tersedia.');
 
     try {
-      await cancelDailyReminder();
+      tz.setLocalLocation(await readDeviceTimeZone());
+      final androidPlugin = _notificationsPlugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+      if (androidPlugin == null || await androidPlugin.areNotificationsEnabled() == false) {
+        throw Exception('Izin notifikasi belum diberikan.');
+      }
 
       const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
         'money_tracker_daily_reminder',
@@ -109,6 +113,7 @@ class NotificationService {
       debugPrint('Daily reminder scheduled for $hour:$minute');
     } catch (e) {
       debugPrint('Error scheduling daily reminder: $e');
+      rethrow;
     }
   }
 
@@ -118,15 +123,19 @@ class NotificationService {
       debugPrint('Daily reminder cancelled');
     } catch (e) {
       debugPrint('Error cancelling daily reminder: $e');
+      rethrow;
     }
   }
 
   static Future<void> showTestNotification() async {
-    if (kIsWeb) return;
+    if (kIsWeb || !Platform.isAndroid) {
+      throw UnsupportedError('Notifikasi belum didukung pada perangkat ini.');
+    }
     if (!_isInitialized) await init();
+    if (!_isInitialized) throw Exception('Layanan notifikasi tidak tersedia.');
 
     try {
-      await requestPermission();
+      if (await requestPermission() != true) throw Exception('Izin notifikasi belum diberikan.');
 
       const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
         'money_tracker_daily_reminder',

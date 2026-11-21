@@ -1,10 +1,59 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:money_tracker/models/pocket.dart';
 import 'package:money_tracker/models/transaction_model.dart';
 import 'package:money_tracker/providers/pocket_provider.dart';
 import 'package:money_tracker/services/gemini_service.dart';
 
 void main() {
+  group('Gemini response handling', () {
+    test('returns every text part and flags a truncated answer', () async {
+      Map<String, dynamic>? sentPayload;
+      final client = MockClient((request) async {
+        if (request.method == 'GET') {
+          return http.Response(jsonEncode({'models': [
+            {'name': 'models/gemini-2.5-flash', 'supportedGenerationMethods': ['generateContent']}
+          ]}), 200);
+        }
+        sentPayload = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(jsonEncode({'candidates': [
+          {'finishReason': 'MAX_TOKENS', 'content': {'parts': [
+            {'text': 'First part. '}, {'text': 'Second part.'}
+          ]}}
+        ]}), 200);
+      });
+      final service = GeminiService(httpClient: client);
+
+      final response = await service.askGemini(apiKey: 'key', prompt: 'Explain');
+
+      expect(response, contains('First part. Second part.'));
+      expect(response.toLowerCase(), contains('terpotong'));
+      expect(sentPayload!['generationConfig']['maxOutputTokens'], greaterThan(2048));
+      client.close();
+    });
+
+    test('does not include thought parts in the visible response', () async {
+      final client = MockClient((request) async {
+        if (request.method == 'GET') {
+          return http.Response(jsonEncode({'models': [
+            {'name': 'models/gemini-2.5-flash', 'supportedGenerationMethods': ['generateContent']}
+          ]}), 200);
+        }
+        return http.Response(jsonEncode({'candidates': [
+          {'finishReason': 'STOP', 'content': {'parts': [
+            {'text': 'internal', 'thought': true}, {'text': 'Final answer.'}
+          ]}}
+        ]}), 200);
+      });
+      final service = GeminiService(httpClient: client);
+      expect(await service.askGemini(apiKey: 'key', prompt: 'Explain'), 'Final answer.');
+      client.close();
+    });
+  });
+
   group('GeminiService Financial Context Tests', () {
     test('buildFinancialContext formats numbers and sections correctly', () {
       final now = DateTime.now();

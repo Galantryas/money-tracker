@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/gemini_provider.dart';
+import 'ai_consent_dialog.dart';
 
 class AiAdvisorScreen extends ConsumerStatefulWidget {
   const AiAdvisorScreen({super.key});
@@ -14,6 +15,8 @@ class _AiAdvisorScreenState extends ConsumerState<AiAdvisorScreen> {
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   bool _canSend = false;
+  bool _consentGranted = false;
+  bool _consentPending = false;
 
   @override
   void initState() {
@@ -45,8 +48,16 @@ class _AiAdvisorScreenState extends ConsumerState<AiAdvisorScreen> {
     });
   }
 
-  void _handleSend(String prompt) {
+  Future<void> _handleSend(String prompt) async {
     if (prompt.trim().isEmpty) return;
+    if ((ref.read(geminiProvider).apiKey?.trim().isNotEmpty ?? false) && !_consentGranted) {
+      if (_consentPending) return;
+      _consentPending = true;
+      final accepted = await showAiConsentDialog(context);
+      _consentPending = false;
+      if (!mounted || !accepted) return;
+      _consentGranted = true;
+    }
     _textController.clear();
     ref.read(geminiProvider.notifier).sendPrompt(prompt);
     _scrollToBottom();

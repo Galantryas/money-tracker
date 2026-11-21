@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
@@ -9,6 +10,29 @@ class BiometricService {
 
   static const String _keyBiometricEnabled = 'biometric_enabled';
   static const String _keyUserPin = 'user_security_pin';
+  static const String _keyPinRetry = 'pin_retry_state_v1';
+
+  Future<({int failures, DateTime? blockedUntil})> loadPinRetryState() async {
+    final raw = await _storage.read(key: _keyPinRetry);
+    if (raw == null) return (failures: 0, blockedUntil: null);
+    try {
+      final value = jsonDecode(raw) as Map<String, dynamic>;
+      return (
+        failures: (value['failures'] as int).clamp(0, 5),
+        blockedUntil: value['blockedUntil'] == null ? null : DateTime.parse(value['blockedUntil'] as String),
+      );
+    } on FormatException {
+      return (failures: 0, blockedUntil: null);
+    } on TypeError {
+      return (failures: 0, blockedUntil: null);
+    }
+  }
+
+  Future<void> savePinRetryState(int failures, DateTime? blockedUntil) async {
+    await _storage.write(key: _keyPinRetry, value: jsonEncode({
+      'failures': failures, 'blockedUntil': blockedUntil?.toIso8601String(),
+    }));
+  }
 
   Future<bool> isDeviceSupported() async {
     try {

@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart' show Database;
 import '../core/database/app_database.dart';
 import '../models/pocket.dart';
 import '../models/transaction_model.dart';
@@ -96,18 +97,22 @@ class PocketNotifier extends StateNotifier<AsyncValue<List<PocketWithBalance>>> 
 
   Future<void> deletePocket(String pocketId) async {
     final db = await AppDatabase.instance.database;
-    await db.delete(
-      'pockets',
-      where: 'id = ?',
-      whereArgs: [pocketId],
-    );
-    // Transaksi terkait juga terhapus berkat cascade atau hapus manual
-    await db.delete(
-      'transactions',
-      where: 'pocket_id = ? OR target_pocket_id = ?',
-      whereArgs: [pocketId, pocketId],
-    );
+    await deletePocketSafely(db, pocketId);
     await loadPockets();
+  }
+
+  static Future<void> deletePocketSafely(Database db, String pocketId) async {
+    await db.transaction((txn) async {
+      final transfers = await txn.query('transactions',
+          columns: ['id'],
+          where: 'type = ? AND (pocket_id = ? OR target_pocket_id = ?)',
+          whereArgs: ['transfer', pocketId, pocketId], limit: 1);
+      if (transfers.isNotEmpty) {
+        throw Exception('Kantong ini memiliki riwayat transfer dan belum dapat dihapus tanpa memengaruhi saldo kantong lain.');
+      }
+      await txn.delete('transactions', where: 'pocket_id = ?', whereArgs: [pocketId]);
+      await txn.delete('pockets', where: 'id = ?', whereArgs: [pocketId]);
+    });
   }
 }
 

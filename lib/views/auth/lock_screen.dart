@@ -12,6 +12,8 @@ class LockScreen extends ConsumerStatefulWidget {
 class _LockScreenState extends ConsumerState<LockScreen> {
   String _enteredPin = '';
   bool _usePinMode = false;
+  String? _newPin;
+  String? _setupError;
 
   void _onNumberTap(String number) {
     if (_enteredPin.length < 4) {
@@ -34,10 +36,47 @@ class _LockScreenState extends ConsumerState<LockScreen> {
   }
 
   Future<void> _submitPin() async {
+    final auth = ref.read(authProvider);
+    if (auth.requiresPinSetup) {
+      final entered = _enteredPin;
+      if (_newPin == null) {
+        setState(() {
+          _enteredPin = '';
+          if (entered == '1234') {
+            _setupError = 'Pilih PIN selain 1234.';
+          } else {
+            _newPin = entered;
+            _setupError = null;
+          }
+        });
+        return;
+      }
+      if (_newPin != entered) {
+        setState(() {
+          _enteredPin = '';
+          _newPin = null;
+          _setupError = 'PIN tidak cocok. Silakan mulai lagi.';
+        });
+        return;
+      }
+      try {
+        await ref.read(authProvider.notifier).completeLegacyPinSetup(entered);
+      } catch (_) {
+        if (mounted) {
+          setState(() {
+            _enteredPin = '';
+            _newPin = null;
+            _setupError = 'PIN tidak dapat disimpan. Silakan coba lagi.';
+          });
+        }
+      }
+      return;
+    }
     final success = await ref.read(authProvider.notifier).unlockWithPin(_enteredPin);
-    if (!success) {
+    if (mounted && (!success || ref.read(authProvider).requiresPinSetup)) {
       setState(() {
         _enteredPin = '';
+        _newPin = null;
       });
     }
   }
@@ -51,11 +90,11 @@ class _LockScreenState extends ConsumerState<LockScreen> {
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 28.0),
           child: Column(
             children: [
-              const Spacer(flex: 2),
+              const SizedBox(height: 32),
 
               // Logo & App Name
               Container(
@@ -91,7 +130,9 @@ class _LockScreenState extends ConsumerState<LockScreen> {
               const SizedBox(height: 8),
 
               Text(
-                _usePinMode
+                authState.requiresPinSetup
+                    ? (_newPin == null ? 'Buat PIN pribadi 4 digit selain 1234' : 'Masukkan kembali PIN baru')
+                    : _usePinMode
                     ? 'Masukkan 4-digit PIN keamanan'
                     : 'Aplikasi terkunci demi keamanan data keuangan Anda',
                 textAlign: TextAlign.center,
@@ -100,10 +141,10 @@ class _LockScreenState extends ConsumerState<LockScreen> {
                 ),
               ),
 
-              const Spacer(flex: 1),
+              const SizedBox(height: 24),
 
               // Error Message
-              if (authState.errorMessage != null) ...[
+              if (authState.errorMessage != null || _setupError != null) ...[
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
@@ -111,7 +152,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    authState.errorMessage!,
+                    _setupError ?? authState.errorMessage!,
                     style: const TextStyle(color: Colors.red, fontSize: 13, fontWeight: FontWeight.w500),
                     textAlign: TextAlign.center,
                   ),
@@ -121,7 +162,10 @@ class _LockScreenState extends ConsumerState<LockScreen> {
 
               if (!_usePinMode) ...[
                 // Biometric Fingerprint Button
-                GestureDetector(
+                Semantics(
+                  button: true,
+                  label: 'Pindai sidik jari',
+                  child: InkWell(
                   onTap: () => ref.read(authProvider.notifier).authenticate(),
                   child: Container(
                     width: 110,
@@ -148,6 +192,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
                         color: Color(0xFF6366F1),
                       ),
                     ),
+                  ),
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -228,12 +273,13 @@ class _LockScreenState extends ConsumerState<LockScreen> {
                       children: [
                         // Switch back to biometric
                         IconButton(
+                          tooltip: 'Gunakan biometrik',
                           iconSize: 32,
                           icon: const Icon(
                             Icons.fingerprint,
                             color: Color(0xFF6366F1),
                           ),
-                          onPressed: () {
+                          onPressed: authState.requiresPinSetup ? null : () {
                             setState(() {
                               _usePinMode = false;
                             });
@@ -241,6 +287,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
                         ),
                         _buildKeypadButton('0', theme, isDark),
                         IconButton(
+                          tooltip: 'Hapus digit PIN',
                           iconSize: 28,
                           icon: Icon(
                             Icons.backspace_outlined,
@@ -254,7 +301,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
                 ),
               ],
 
-              const Spacer(flex: 2),
+              const SizedBox(height: 32),
             ],
           ),
         ),
@@ -263,7 +310,12 @@ class _LockScreenState extends ConsumerState<LockScreen> {
   }
 
   Widget _buildKeypadButton(String text, ThemeData theme, bool isDark) {
-    return InkWell(
+    return Semantics(
+      button: true,
+      label: text,
+      onTap: () => _onNumberTap(text),
+      excludeSemantics: true,
+      child: InkWell(
       onTap: () => _onNumberTap(text),
       borderRadius: BorderRadius.circular(40),
       child: Container(
@@ -293,6 +345,6 @@ class _LockScreenState extends ConsumerState<LockScreen> {
           ),
         ),
       ),
-    );
+    ));
   }
 }

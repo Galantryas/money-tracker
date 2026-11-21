@@ -343,7 +343,7 @@ class PocketDetailScreen extends ConsumerWidget {
                               separatorBuilder: (_, __) => const SizedBox(height: 10),
                               itemBuilder: (context, index) {
                                 final tx = pocketTxs[index];
-                                return _buildTxItem(context, tx, pocket.id, isDark);
+                                return _buildTxItem(context, tx, pocket.id, isDark, isBalanceVisible);
                               },
                             );
                           },
@@ -365,7 +365,7 @@ class PocketDetailScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildTxItem(BuildContext context, TransactionModel tx, String currentPocketId, bool isDark) {
+  Widget _buildTxItem(BuildContext context, TransactionModel tx, String currentPocketId, bool isDark, bool isBalanceVisible) {
     Color amountColor;
     String sign;
 
@@ -457,7 +457,7 @@ class PocketDetailScreen extends ConsumerWidget {
               ),
             ),
             Text(
-              '$sign${CurrencyFormatter.format(tx.amount)}',
+              CurrencyFormatter.privateAmount(tx.amount, isVisible: isBalanceVisible, sign: sign),
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 14,

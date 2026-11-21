@@ -24,11 +24,18 @@ class AppDatabase {
     }
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
+    return openDatabaseAtPath(path);
+  }
 
+  @visibleForTesting
+  Future<Database> openDatabaseAtPath(String path) async {
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _createDB,
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) await _createBudgetTable(db);
+      },
       onOpen: (db) async {
         await _ensureCategories(db);
       },
@@ -36,6 +43,7 @@ class AppDatabase {
   }
 
   Future<void> _createDB(Database db, int version) async {
+    await _createBudgetTable(db);
     // Tabel Kantong
     await db.execute('''
       CREATE TABLE pockets (
@@ -85,6 +93,7 @@ class AppDatabase {
       {'id': uuid.v4(), 'name': 'Belanja', 'icon_name': 'shopping_bag', 'color_value': 0xFF3B82F6, 'type': 'expense'},
       {'id': uuid.v4(), 'name': 'Transportasi', 'icon_name': 'car', 'color_value': 0xFFEAB308, 'type': 'expense'},
       {'id': uuid.v4(), 'name': 'Layanan', 'icon_name': 'receipt', 'color_value': 0xFF6366F1, 'type': 'expense'},
+      {'id': uuid.v4(), 'name': 'Tempat Tinggal', 'icon_name': 'home', 'color_value': 0xFF0D9488, 'type': 'expense'},
       {'id': uuid.v4(), 'name': 'Hiburan', 'icon_name': 'film', 'color_value': 0xFF8B5CF6, 'type': 'expense'},
       {'id': uuid.v4(), 'name': 'Kesehatan', 'icon_name': 'heart_pulse', 'color_value': 0xFFEC4899, 'type': 'expense'},
       {'id': uuid.v4(), 'name': 'Keluarga', 'icon_name': 'family', 'color_value': 0xFF06B6D4, 'type': 'expense'},
@@ -103,20 +112,28 @@ class AppDatabase {
     }
   }
 
-  static Future<void> _ensureCategories(Database db) async {
-    const uuid = Uuid();
-    // Normalisasi / migrasi kategori lama jika ada
-    await db.rawUpdate("UPDATE categories SET name = 'Belanja' WHERE name = 'Belanja Kebutuhan'");
-    await db.rawUpdate("UPDATE categories SET name = 'Layanan' WHERE name = 'Tagihan & Listrik'");
-    await db.rawUpdate("UPDATE categories SET name = 'Hiburan' WHERE name = 'Hiburan & Liburan'");
-    await db.rawUpdate("UPDATE categories SET name = 'Pengeluaran Lain' WHERE name = 'Lain-lain'");
-    await db.rawUpdate("UPDATE categories SET name = 'Layanan' WHERE name = 'Pendidikan'");
+  static Future<void> _createBudgetTable(DatabaseExecutor db) async {
+    await db.execute('''CREATE TABLE IF NOT EXISTS category_budgets (
+      category TEXT PRIMARY KEY NOT NULL,
+      monthly_limit REAL NOT NULL CHECK (monthly_limit > 0)
+    )''');
+  }
 
+  Future<List<Map<String, dynamic>>> loadCategories(Database db) async {
+    return db.transaction((txn) async {
+      await _ensureCategories(txn);
+      return txn.query('categories');
+    });
+  }
+
+  static Future<void> _ensureCategories(DatabaseExecutor db) async {
+    const uuid = Uuid();
     final expectedExpenses = [
       {'name': 'Makanan & Minuman', 'icon_name': 'utensils', 'color_value': 0xFFF97316},
       {'name': 'Belanja', 'icon_name': 'shopping_bag', 'color_value': 0xFF3B82F6},
       {'name': 'Transportasi', 'icon_name': 'car', 'color_value': 0xFFEAB308},
       {'name': 'Layanan', 'icon_name': 'receipt', 'color_value': 0xFF6366F1},
+      {'name': 'Tempat Tinggal', 'icon_name': 'home', 'color_value': 0xFF0D9488},
       {'name': 'Hiburan', 'icon_name': 'film', 'color_value': 0xFF8B5CF6},
       {'name': 'Kesehatan', 'icon_name': 'heart_pulse', 'color_value': 0xFFEC4899},
       {'name': 'Keluarga', 'icon_name': 'family', 'color_value': 0xFF06B6D4},
@@ -141,24 +158,28 @@ class AppDatabase {
 
   Future<Map<String, dynamic>> exportAllData() async {
     final db = await instance.database;
-    final pockets = await db.query('pockets');
-    final categories = await db.query('categories');
-    final transactions = await db.query('transactions');
-
-    return {
-      'pockets': pockets,
-      'categories': categories,
-      'transactions': transactions,
-    };
+    return db.transaction((txn) async => {
+      'pockets': await txn.query('pockets'),
+      'categories': await txn.query('categories'),
+      'transactions': await txn.query('transactions'),
+      'category_budgets': await txn.query('category_budgets'),
+    });
   }
 
   Future<void> restoreAllData(Map<String, dynamic> data) async {
     final db = await instance.database;
+    await restoreToDatabase(db, data);
+  }
+
+  @visibleForTesting
+  Future<void> restoreToDatabase(Database db, Map<String, dynamic> data) async {
     final pockets = (data['pockets'] as List<dynamic>? ?? []);
     final categories = (data['categories'] as List<dynamic>? ?? []);
     final transactions = (data['transactions'] as List<dynamic>? ?? []);
 
     await db.transaction((txn) async {
+      await _createBudgetTable(txn);
+      await txn.delete('category_budgets');
       // Hapus data yang ada sekarang
       await txn.delete('transactions');
       await txn.delete('pockets');
@@ -185,6 +206,9 @@ class AppDatabase {
         if (tx is Map) {
           await txn.insert('transactions', Map<String, dynamic>.from(tx));
         }
+      }
+      for (final budget in (data['category_budgets'] as List? ?? [])) {
+        await txn.insert('category_budgets', Map<String, dynamic>.from(budget as Map));
       }
     });
   }

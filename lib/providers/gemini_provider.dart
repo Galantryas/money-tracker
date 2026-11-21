@@ -4,6 +4,13 @@ import '../services/gemini_service.dart';
 import 'pocket_provider.dart';
 import 'transaction_provider.dart';
 
+List<T> requireFinancialData<T>(AsyncValue<List<T>> value) {
+  if (value.isLoading || value.hasError || value.valueOrNull == null) {
+    throw Exception('Data keuangan belum tersedia. Pastikan data berhasil dimuat, lalu coba lagi.');
+  }
+  return value.valueOrNull!;
+}
+
 class AiChatMessage {
   final String id;
   final String text;
@@ -39,6 +46,7 @@ class GeminiState {
 
   GeminiState copyWith({
     String? apiKey,
+    bool clearApiKey = false,
     bool? isConfigured,
     bool? isLoading,
     bool? isTestingKey,
@@ -46,7 +54,7 @@ class GeminiState {
     List<AiChatMessage>? messages,
   }) {
     return GeminiState(
-      apiKey: apiKey ?? this.apiKey,
+      apiKey: clearApiKey ? null : apiKey ?? this.apiKey,
       isConfigured: isConfigured ?? this.isConfigured,
       isLoading: isLoading ?? this.isLoading,
       isTestingKey: isTestingKey ?? this.isTestingKey,
@@ -107,7 +115,7 @@ class GeminiNotifier extends StateNotifier<GeminiState> {
   Future<void> removeApiKey() async {
     await _service.removeApiKey();
     state = state.copyWith(
-      apiKey: null,
+      clearApiKey: true,
       isConfigured: false,
       errorMessage: null,
     );
@@ -181,8 +189,8 @@ class GeminiNotifier extends StateNotifier<GeminiState> {
 
     try {
       // 1. Gather current financial data from Riverpod providers
-      final pockets = _ref.read(pocketProvider).value ?? [];
-      final transactions = _ref.read(transactionProvider).value ?? [];
+      final pockets = requireFinancialData(_ref.read(pocketProvider));
+      final transactions = requireFinancialData(_ref.read(transactionProvider));
 
       // Calculate totals
       final totalBalance = pockets.fold<double>(0.0, (sum, p) => sum + p.currentBalance);

@@ -3,11 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/utils/currency_formatter.dart';
+import '../../core/utils/async_action_guard.dart';
 import '../../core/utils/icon_helper.dart';
 import '../../core/utils/thousands_separator_input_formatter.dart';
 import '../../models/transaction_model.dart';
 import '../../providers/pocket_provider.dart';
 import '../../providers/transaction_provider.dart';
+import '../../providers/balance_privacy_provider.dart';
 
 class AddTransactionScreen extends ConsumerStatefulWidget {
   final String? preselectedPocketId;
@@ -27,6 +29,7 @@ class AddTransactionScreen extends ConsumerStatefulWidget {
 
 class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _saveGuard = AsyncActionGuard();
 
   late String _type; // 'expense' or 'income'
   late TextEditingController _amountController;
@@ -190,7 +193,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(pwb.pocket.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                                    Text(CurrencyFormatter.format(pwb.currentBalance),
+                                    Text(CurrencyFormatter.privateAmount(pwb.currentBalance, isVisible: ref.read(balancePrivacyProvider)),
                                         style: TextStyle(fontSize: 12, color: Colors.grey[600])),
                                   ],
                                 ),
@@ -309,7 +312,19 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
     );
   }
 
-  Future<void> _save() async {
+  Future<void> _save() => _saveGuard.run(() async {
+    try {
+      await _saveTransaction();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Transaksi gagal disimpan. Periksa data dan coba lagi.')),
+        );
+      }
+    }
+  });
+
+  Future<void> _saveTransaction() async {
     if (!_formKey.currentState!.validate()) return;
     if (_selectedPocketId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -571,7 +586,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                                           ),
                                         ),
                                         Text(
-                                          CurrencyFormatter.format(pwb.currentBalance),
+                                          CurrencyFormatter.privateAmount(pwb.currentBalance, isVisible: ref.watch(balancePrivacyProvider)),
                                           style: const TextStyle(
                                             color: Colors.white,
                                             fontWeight: FontWeight.bold,

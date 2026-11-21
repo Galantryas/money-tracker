@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/utils/currency_formatter.dart';
+import '../../core/utils/async_action_guard.dart';
+import '../../providers/balance_privacy_provider.dart';
 import '../../core/utils/icon_helper.dart';
 import '../../core/utils/thousands_separator_input_formatter.dart';
 import '../../models/pocket.dart';
@@ -20,6 +22,7 @@ class TransferScreen extends ConsumerStatefulWidget {
 }
 
 class _TransferScreenState extends ConsumerState<TransferScreen> {
+  final _saveGuard = AsyncActionGuard();
   final _formKey = GlobalKey<FormState>();
   final _amountController = TextEditingController();
   final _noteController = TextEditingController();
@@ -163,7 +166,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
                                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                                     ),
                                     Text(
-                                      CurrencyFormatter.format(pwb.currentBalance),
+                                      CurrencyFormatter.privateAmount(pwb.currentBalance, isVisible: ref.read(balancePrivacyProvider)),
                                       style: TextStyle(
                                         color: Colors.grey.shade600,
                                         fontSize: 13,
@@ -189,7 +192,19 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
     );
   }
 
-  Future<void> _submitTransfer() async {
+  Future<void> _submitTransfer() => _saveGuard.run(() async {
+    try {
+      await _saveTransfer();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Transfer gagal disimpan. Periksa data dan coba lagi.')),
+        );
+      }
+    }
+  });
+
+  Future<void> _saveTransfer() async {
     if (!_formKey.currentState!.validate()) return;
 
     if (_sourcePocketId == null || _targetPocketId == null) {
@@ -224,7 +239,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Saldo ${sourcePocket.pocket.name} tidak cukup (${CurrencyFormatter.format(sourcePocket.currentBalance)})',
+            'Saldo ${sourcePocket.pocket.name} tidak cukup (${CurrencyFormatter.privateAmount(sourcePocket.currentBalance, isVisible: ref.read(balancePrivacyProvider))})',
           ),
         ),
       );
@@ -258,7 +273,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
         SnackBar(
           backgroundColor: const Color(0xFF10B981),
           content: Text(
-            'Berhasil transfer ${CurrencyFormatter.format(amount)} ke ${targetPocket.pocket.name}',
+            'Berhasil transfer ${CurrencyFormatter.privateAmount(amount, isVisible: ref.read(balancePrivacyProvider))} ke ${targetPocket.pocket.name}',
           ),
         ),
       );
@@ -429,7 +444,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
                                       ),
                                       const SizedBox(height: 6),
                                       Text(
-                                        CurrencyFormatter.format(sourcePocket.currentBalance),
+                                        CurrencyFormatter.privateAmount(sourcePocket.currentBalance, isVisible: ref.watch(balancePrivacyProvider)),
                                         style: TextStyle(
                                           color: Colors.grey.shade600,
                                           fontSize: 11,
@@ -504,7 +519,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
                                       ),
                                       const SizedBox(height: 6),
                                       Text(
-                                        CurrencyFormatter.format(targetPocket.currentBalance),
+                                        CurrencyFormatter.privateAmount(targetPocket.currentBalance, isVisible: ref.watch(balancePrivacyProvider)),
                                         style: TextStyle(
                                           color: Colors.grey.shade600,
                                           fontSize: 11,
